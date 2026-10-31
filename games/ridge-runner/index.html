@@ -25,7 +25,7 @@
 (async () => {
   const cv = document.getElementById('c'), cx = cv.getContext('2d');
   const $ = id => document.getElementById(id);
-  const { instance } = await WebAssembly.instantiateStreaming(fetch('game.wasm'), { env: { s: Math.sin } });
+  const { instance } = await WebAssembly.instantiate(await (await fetch('game.wasm')).arrayBuffer(), { env: { s: Math.sin } });
   const { h, t, memory } = instance.exports;
   const st = new Float32Array(memory.buffer, 64, 8);
   let best = 0; try { best = +localStorage.getItem('ridgeBest') || 0 } catch {}
