@@ -1,13 +1,16 @@
 # Ridge Runner
 
-A small original hill-climb driving game. The physics (terrain, two Verlet wheels, a rigid
-frame, ground contact, throttle and mid-air tilt) lives in `game.c`, compiled to a
-WebAssembly module under 512 bytes. `index.html` is the front end: rendering, input,
-fuel, crash detection and score.
+A small original hill-climb driving game where the whole game lives in a WebAssembly
+module of at most 512 bytes: terrain, driving physics, tilting in the air, crash and
+restart, and drawing every pixel. `index.html` is only a wrapper that loads the module,
+passes the keys in and copies each finished frame to a canvas.
 
 ## Build
 
-    ./build.sh        # needs clang 15+ with the wasm32 target and wasm-ld
+    ./build.sh        # needs clang 15+ (wasm32 target), wasm-ld and python3
+
+`build.sh` compiles `game.c`, then `strip.py` removes two empty sections the linker
+always adds, and the script fails if `game.wasm` is over 512 bytes.
 
 ## Play
 
@@ -15,16 +18,15 @@ Serve the folder (WebAssembly can't load from `file://`) and open it:
 
     python3 -m http.server -d games/ridge-runner 8000
 
-Right arrow / D or the GAS button drives forward and tilts the bike back in the air.
-Left arrow / A or BRAKE reverses and tilts it forward. R restarts. Grab red fuel cans
-to keep going, and don't land on your head.
+Hold Right arrow (or the right half of the screen) for gas, Left arrow (left half) to
+brake. In the air, gas tips the nose up and brake tips it down. Land at an angle that
+doesn't match the ground and you start over. The hills keep getting taller.
 
 ## WebAssembly interface
 
 | Export | Meaning |
 | --- | --- |
-| `memory` | 8 floats at byte 64: rear x,y, front x,y, then their previous positions |
-| `t(gas)` | advance one physics step, gas in -1..1; returns wheels on the ground |
-| `h(x)` | terrain height at x |
+| `f(gas)` | run one frame; gas is 1, -1 or 0 |
+| `memory` | after `f`, a 160x96 RGBA image at byte 4096 |
 
-Import: `env.s` = `Math.sin`.
+No imports.

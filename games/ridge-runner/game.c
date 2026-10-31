@@ -1,33 +1,33 @@
-// Ridge Runner: tiny two-wheel hill-climb physics, compiled to WebAssembly.
-// State at byte 64 of memory (float[8]), written by JS at start:
-//   rear x,y  front x,y  rear prev x,y  front prev x,y
-#define st ((float *)64)
-__attribute__((import_name("s"))) float S(float);
+// Ridge Runner: the whole game (physics, crashes, restart and drawing) in WebAssembly.
+// Each call to f(gas) runs one frame (gas: 1 = gas, -1 = brake, 0 = coast) and
+// leaves a 160x96 RGBA image at byte 4096 of memory for the page to show.
 
-// Terrain height; hills grow taller the further you go.
-__attribute__((export_name("h"))) float ground(float x) {
-  float a = 15 + x * .01f;
-  return a * S(x * .009f) + a * .5f * S(x * .025f);
+static float V, U, X, Y, A;   // vertical speed, forward speed, position x/y, tilt (as a slope)
+
+// Rolling hills that start flat and grow taller the further you drive.
+// t*(.5-|t|) is a cheap sine-like wave, so no maths library is needed.
+__attribute__((noinline)) static float ground(float x) {
+  float t = x * .002f;
+  t -= __builtin_rintf(t);
+  return (99 + x * .25f) * t * (.5f - __builtin_fabsf(t));
 }
 
-// One Verlet step for one wheel. (ex, ey) is the gas-driven push used to tilt the bike in the air.
-static int wheel(float *p, float ex, float ey, float gas) {
-  float vx = p[0] - p[4], vy = p[1] - p[5] - .15f;
-  p[4] = p[0]; p[5] = p[1];
-  p[0] += vx + ex; p[1] += vy + ey;
-  float g = ground(p[0]) + 6;
-  if (p[1] >= g) return 0;
-  p[1] = g;                       // on the ground: push out and drive forward
-  p[4] = p[0] - vx * .9f - gas * .2f;
-  return 1;
-}
-
-// Advance one frame with throttle gas (-1..1). Returns how many wheels touch the ground.
-__attribute__((export_name("t"))) int step(float gas) {
-  float k = gas * .0005f, dx = (st[2] - st[0]) * k, dy = (st[3] - st[1]) * k;
-  int hit = wheel(st, dy, -dx, gas) + wheel(st + 2, -dy, dx, gas);
-  dx = st[2] - st[0]; dy = st[3] - st[1];   // keep wheels 40 apart
-  float d = dx * dx + dy * dy, r = (800 - d * .5f) / (d + 1600);
-  st[0] -= dx * r; st[1] -= dy * r; st[2] += dx * r; st[3] += dy * r;
-  return hit;
+__attribute__((export_name("f"))) void frame(float gas) {
+  V -= .1f; X += U; Y += V;
+  A += gas * .04f;                                  // gas tips the nose up, brake tips it down
+  float g = ground(X), s = ground(X + 1) - g;       // ground height and slope under the car
+  if (Y <= g) {                                     // touching the ground
+    if (__builtin_fabsf(A - s) > .8f) X = U = 0;    // landed at a bad angle: back to the start
+    Y = g; A = s;
+    U = (U + (gas + gas - s) * .03f) * .99f;            // drive, minus the pull of the slope and drag
+    V = U * s;
+  }
+  unsigned *px = (unsigned *)4096;
+  for (int j = 0; j < 160 * 96; j++) {
+    float dx = (j % 160 - 60) * 2, dy = (48 - j / 160) * 2;
+    float a = dx + A * dy, b = dy - A * dx;         // pixel in the car's tilted frame
+    px[j] = __builtin_fabsf(a) < 16 && __builtin_fabsf(b - 7) < 7 ? b < 4 ? 0xff222222 : 0xff41a5f2  // car: dark wheels, orange body
+          : Y + dy < ground(X + dx) ? 0xff2f7a4f                                  // grass
+          : 0xffd08a50;                                                           // sky
+  }
 }

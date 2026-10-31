@@ -1,122 +1,16 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>Ridge Runner</title>
-<style>
-  html,body{margin:0;height:100%;background:#16202c;color:#f3efe0;font:600 16px system-ui,sans-serif;overflow:hidden;touch-action:none;user-select:none}
-  canvas{display:block;width:100%;height:100%}
-  #hud{position:fixed;top:12px;left:16px;right:16px;display:flex;gap:18px;flex-wrap:wrap;pointer-events:none}
-  #fuel{width:120px;height:12px;border:2px solid #f3efe0;border-radius:6px;overflow:hidden;align-self:center}
-  #fuel i{display:block;height:100%;background:#f2a541}
-  #msg{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;font-size:22px;line-height:1.5;pointer-events:none}
-  .pad{position:fixed;bottom:16px;width:96px;height:96px;border-radius:50%;border:2px solid #f3efe066;background:#ffffff14;color:#f3efe0;font:700 15px system-ui}
-  #brake{left:16px} #gas{right:16px}
-</style>
-</head>
-<body>
-<canvas id="c"></canvas>
-<div id="hud"><span id="dist">0 m</span><span id="best"></span><div id="fuel"><i></i></div></div>
-<div id="msg"></div>
-<button class="pad" id="brake">BRAKE</button>
-<button class="pad" id="gas">GAS</button>
+<body style="margin:0;background:#000">
+<canvas id="c" width="160" height="96" style="width:100%;image-rendering:pixelated"></canvas>
 <script>
-(async () => {
-  const cv = document.getElementById('c'), cx = cv.getContext('2d');
-  const $ = id => document.getElementById(id);
-  const { instance } = await WebAssembly.instantiate(await (await fetch('game.wasm')).arrayBuffer(), { env: { s: Math.sin } });
-  const { h, t, memory } = instance.exports;
-  const st = new Float32Array(memory.buffer, 64, 8);
-  let best = 0; try { best = +localStorage.getItem('ridgeBest') || 0 } catch {}
-  let fuel, dead, cans, keys = { gas: 0, brake: 0 };
-
-  function reset() {
-    const y = h(0) + 30, y2 = h(40) + 30;
-    st.set([0, y, 40, y2, 0, y, 40, y2]);
-    fuel = 1; dead = ''; cans = new Set();
-    $('msg').textContent = '';
-  }
-  reset();
-
-  const press = (k, v) => { keys[k] = v; if (v && dead) reset(); };
-  addEventListener('keydown', e => { if (e.key === 'ArrowRight' || e.key === 'd') press('gas', 1); if (e.key === 'ArrowLeft' || e.key === 'a') press('brake', 1); if (e.key === ' ' || e.key === 'r') reset(); });
-  addEventListener('keyup', e => { if (e.key === 'ArrowRight' || e.key === 'd') keys.gas = 0; if (e.key === 'ArrowLeft' || e.key === 'a') keys.brake = 0; });
-  for (const k of ['gas', 'brake']) {
-    const b = $(k);
-    b.addEventListener('pointerdown', e => { e.preventDefault(); press(k, 1) });
-    for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, () => keys[k] = 0);
-  }
-
-  const CAN = 600; // a fuel can every 600 units
-  function update() {
-    if (dead) return;
-    const g = fuel > 0 ? keys.gas - keys.brake : 0;
-    t(g);
-    fuel -= Math.abs(g) * .0005 + .0001;
-    const mx = (st[0] + st[2]) / 2, my = (st[1] + st[3]) / 2;
-    const n = Math.round(mx / CAN);
-    if (n > 0 && !cans.has(n) && Math.abs(mx - n * CAN) < 25) { cans.add(n); fuel = 1; }
-    // rider's head sits above the middle of the frame; crash if it hits the ground
-    const ang = Math.atan2(st[3] - st[1], st[2] - st[0]);
-    const hx = mx - Math.sin(ang) * 30, hy = my + Math.cos(ang) * 30;
-    if (hy < h(hx) + 4) dead = 'You flipped!';
-    else if (fuel <= 0 && Math.abs(st[0] - st[4]) < .02) dead = 'Out of fuel';
-    if (dead) {
-      const d = Math.max(0, mx / 10 | 0);
-      if (d > best) { best = d; try { localStorage.setItem('ridgeBest', best) } catch {} }
-      $('msg').innerHTML = dead + '<br>' + d + ' m<br><small>press gas or R to retry</small>';
-    }
-  }
-
-  function draw() {
-    const W = cv.width = innerWidth * devicePixelRatio, H = cv.height = innerHeight * devicePixelRatio;
-    const z = Math.min(W, H) / 320, mx = (st[0] + st[2]) / 2, my = (st[1] + st[3]) / 2;
-    cx.setTransform(z, 0, 0, -z, W / 2 - mx * z, H * .55 + my * z);
-    const L = mx - W / z, R = mx + W / z;
-    const sky = cx.createLinearGradient(0, my + 200, 0, my - 200);
-    sky.addColorStop(0, '#2a4b6e'); sky.addColorStop(1, '#e98a5a');
-    cx.fillStyle = sky; cx.fillRect(L, my - 400, R - L, 800);
-    // distant ridge
-    cx.fillStyle = '#3b3550'; cx.beginPath(); cx.moveTo(L, my - 400);
-    for (let x = L; x <= R; x += 8) cx.lineTo(x, my - 40 + 30 * Math.sin((x - mx * .5) * .006) + 10 * Math.sin(x * .02));
-    cx.lineTo(R, my - 400); cx.fill();
-    // terrain
-    cx.fillStyle = '#4f7a3a'; cx.beginPath(); cx.moveTo(L, my - 400);
-    for (let x = L; x <= R; x += 4) cx.lineTo(x, h(x));
-    cx.lineTo(R, my - 400); cx.fill();
-    cx.strokeStyle = '#8fbf5a'; cx.lineWidth = 3; cx.beginPath();
-    for (let x = L; x <= R; x += 4) cx.lineTo(x, h(x));
-    cx.stroke();
-    // fuel cans
-    for (let n = Math.max(1, Math.ceil(L / CAN)); n * CAN < R; n++) if (!cans.has(n)) {
-      const x = n * CAN, y = h(x) + 2;
-      cx.fillStyle = '#d64545'; cx.fillRect(x - 5, y, 10, 13); cx.fillStyle = '#f3efe0'; cx.fillRect(x - 2, y + 13, 4, 3);
-    }
-    // bike
-    const ang = Math.atan2(st[3] - st[1], st[2] - st[0]);
-    cx.save(); cx.translate(mx, my); cx.rotate(ang);
-    cx.fillStyle = '#f2a541'; cx.beginPath(); cx.moveTo(-24, 2); cx.lineTo(24, 2); cx.lineTo(14, 14); cx.lineTo(-18, 12); cx.fill();
-    cx.fillStyle = '#2d6cdf'; cx.fillRect(-4, 12, 8, 14);
-    cx.fillStyle = '#f3efe0'; cx.beginPath(); cx.arc(0, 30, 5, 0, 7); cx.fill();
-    cx.restore();
-    for (let i = 0; i < 4; i += 2) {
-      cx.fillStyle = '#1b1b1f'; cx.beginPath(); cx.arc(st[i], st[i + 1], 6, 0, 7); cx.fill();
-      cx.fillStyle = '#9aa0a8'; cx.beginPath(); cx.arc(st[i], st[i + 1], 2.5, 0, 7); cx.fill();
-    }
-    $('dist').textContent = Math.max(0, mx / 10 | 0) + ' m';
-    $('best').textContent = best ? 'best ' + best + ' m' : '';
-    $('fuel').firstChild.style.width = Math.max(0, fuel * 100) + '%';
-  }
-
-  let last = performance.now(), acc = 0;
-  (function loop(now) {
-    acc = Math.min(acc + now - last, 100); last = now;
-    while (acc >= 1000 / 120) { update(); acc -= 1000 / 120; }
-    draw(); requestAnimationFrame(loop);
-  })(last);
-  window.__game = { st, h, keys, get dead() { return dead }, get fuel() { return fuel } };
-})();
+// Wrapper only: load the module, pass input in, copy its frame to the canvas.
+let g = 0;
+onkeydown = e => g = e.key == 'ArrowRight' ? 1 : e.key == 'ArrowLeft' ? -1 : g;
+onkeyup = () => g = 0;
+onpointerdown = e => g = e.clientX > innerWidth / 2 ? 1 : -1;
+onpointerup = () => g = 0;
+fetch('game.wasm').then(r => r.arrayBuffer()).then(b => WebAssembly.instantiate(b)).then(({ instance: { exports: w } }) => {
+  const x = c.getContext('2d'), img = new ImageData(new Uint8ClampedArray(w.memory.buffer, 4096, 61440), 160);
+  (function loop() { w.f(g); x.putImageData(img, 0, 0); requestAnimationFrame(loop) })();
+});
 </script>
-</body>
-</html>
